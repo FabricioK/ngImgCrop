@@ -23,6 +23,7 @@
     "test"
   ],
   "devDependencies": {
-    "angular": "~1.2.19"
+    "angular": "~1.2.19",
+    "clmtrackr":"latest"
   }
 }

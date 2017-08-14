@@ -1,31 +1,38 @@
 <!DOCTYPE html>
 <html ng-app="app">
+
 <head>
   <title>ngImgCrop Test Page</title>
   <script type="text/javascript" src="../bower_components/angular/angular.min.js"></script>
+  <script type="text/javascript" src="../bower_components/clmtrackr/clmtrackr.min.js"></script>
+  <script type="text/javascript" src="./model_pca_20_svm.js"></script>
   <!--<script src="//ajax.googleapis.com/ajax/libs/angularjs/1.3.0/angular.min.js"></script>-->
   <script type="text/javascript" src="../compile/unminified/ng-img-crop.js"></script>
-  <link rel="stylesheet" href="../compile/unminified/ng-img-crop.css"/>
+  <link rel="stylesheet" href="../compile/unminified/ng-img-crop.css" />
   <style>
     .cropArea {
       background: #E4E4E4;
       margin: auto;
       overflow: hidden;
     }
+
     .cropArea.big {
-      width:800px;
-      height:600px;
+      width: 800px;
+      height: 600px;
     }
+
     .cropArea.medium {
-      width:500px;
-      height:350px;
+      width: 500px;
+      height: 350px;
     }
+
     .cropArea.small {
-      width:300px;
-      height:200px;
+      width: 300px;
+      height: 200px;
     }
   </style>
 </head>
+
 <body ng-controller="Ctrl">
   <div>
     <label><input type="checkbox" ng-model="enableCrop" ng-init="enableCrop=true"/> Add ngImgCrop to Page</label>
@@ -79,69 +86,85 @@
     <button ng-click="imageDataURI=''">Reset Image</button>
   </div>
 
-  <div ng-if="enableCrop" class="cropArea" ng-class="{'big':size=='big', 'medium':size=='medium', 'small':size=='small'}">
-    <img-crop image="imageDataURI"
-              result-image="$parent.resImageDataURI"
-              change-on-fly="changeOnFly"
-              area-type="{{type}}"
-              area-min-size="selMinSize"
-              result-image-format="{{resImgFormat}}"
-              result-image-quality="resImgQuality"
-              result-image-size="resImgSize"
-              on-change="onChange($dataURI)"
-              on-load-begin="onLoadBegin()"
-              on-load-done="onLoadDone()"
-              on-load-error="onLoadError()"
-    ></img-crop>
-              <!--aspect-ratio="aspectRatio"-->
+  <div ng-if="enableCrop" class="cropArea">
+    <!-- <img-crop image="imageDataURI" result-image="$parent.resImageDataURI" change-on-fly="changeOnFly" area-type="{{type}}" area-min-size="selMinSize"
+      result-image-format="{{resImgFormat}}" result-image-quality="resImgQuality" result-image-size="resImgSize" on-change="onChange($dataURI)"
+      on-load-begin="onLoadBegin()" on-load-done="onLoadDone()" on-load-error="onLoadError()"></img-crop>
+   aspect-ratio="aspectRatio"-->
+    <video-crop play="play" disparidadeangulo="disparidadeangulo" disparidadeolhos="disparidadeolhos" on-change="resultChange($dataURI)"
+      blockcallback="bloqueiafoto" callback="capturar" style="width:500px;height:500px"></video-crop>
+
+    <button ng-click="capturar()">Capturar</button>
   </div>
 
   <div style="text-align:center">
     <h3>Result</h3>
     <div>
-      <img ng-src="{{resImageDataURI}}" />
+      <img ng-src="{{streameddata}}" />
     </div>
   </div>
 
   <script type="text/javascript">
+    function convertDataURIToBinary(dataURI) {
+      var BASE64_MARKER = ';base64,';
+      var base64Index = dataURI.indexOf(BASE64_MARKER) + BASE64_MARKER.length;
+      var base64 = dataURI.substring(base64Index);
+      var raw = window.atob(base64);
+      var rawLength = raw.length;
+      var array = new Uint8Array(new ArrayBuffer(rawLength));
+
+      for (var i = 0; i < rawLength; i++) {
+        array[i] = raw.charCodeAt(i);
+      }
+      return array;
+    }
+
     angular.module('app', ['ngImgCrop'])
-      .controller('Ctrl', function($scope) {
-        $scope.size='small';
-        $scope.type='circle';
-        $scope.imageDataURI='';
-        $scope.resImageDataURI='';
-        $scope.resImgFormat='image/png';
-        $scope.resImgQuality=1;
-        $scope.selMinSize=100;
-        $scope.resImgSize=200;
-        //$scope.aspectRatio=1.2;
-        $scope.onChange=function($dataURI) {
-          console.log('onChange fired');
-        };
-        $scope.onLoadBegin=function() {
-          console.log('onLoadBegin fired');
-        };
-        $scope.onLoadDone=function() {
-          console.log('onLoadDone fired');
-        };
-        $scope.onLoadError=function() {
-          console.log('onLoadError fired');
-        };
-        var handleFileSelect=function(evt) {
-          var file=evt.currentTarget.files[0];
-          var reader = new FileReader();
-          reader.onload = function (evt) {
-            $scope.$apply(function($scope){
-              $scope.imageDataURI=evt.target.result;
-            });
-          };
-          reader.readAsDataURL(file);
-        };
-        angular.element(document.querySelector('#fileInput')).on('change',handleFileSelect);
-        $scope.$watch('resImageDataURI',function(){
-          //console.log('Res image', $scope.resImageDataURI);
-        });
+      .controller('Ctrl', function ($scope, $q) {
+        $scope.size = 'small';
+        $scope.type = 'circle';
+        $scope.imageDataURI = '';
+        $scope.resImageDataURI = '';
+        $scope.resImgFormat = 'image/png';
+        $scope.resImgQuality = 1;
+        $scope.selMinSize = 100;
+        $scope.resImgSize = 200;
+        var _second = 1000;
+        var _minute = _second * 60;
+        var _hour = _minute * 60;
+        var _day = _hour * 24;
+
+        $scope.play = false;
+        $scope.limparCaptura = function () {
+          $scope.dataimgretorno = null;
+        }
+        $scope.resultChange = function (result) {
+          var now = new Date();
+          var distance = now - $scope.end;
+          var seconds = Math.floor((distance % _minute) / _second);
+
+          $scope.streameddata = result;
+        }
+        $scope.play = true;
+        $scope.capturar = function () {
+          if ($scope.streameddata) {
+            $scope.play = false;
+            $scope.bloqueiafoto = true;
+            $scope.facesret = null;
+            $scope.dataimgretorno = $scope.streameddata;
+            var img = document.createElement("img");
+            img.onload = function () {
+              var ui8a = convertDataURIToBinary($scope.dataimgretorno);
+              var bb = new Blob([ui8a.buffer], { type: "image/jpeg" });
+              if (bb) {
+                console.log(bb);
+              }
+            }
+            img.src = $scope.dataimgretorno;
+          }
+        }
       });
   </script>
 </body>
+
 </html>

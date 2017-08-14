@@ -2,10 +2,10 @@
  * ngImgCrop v0.3.2
  * https://github.com/alexk111/ngImgCrop
  *
- * Copyright (c) 2014 Alex Kaul
+ * Copyright (c) 2017 Alex Kaul
  * License: MIT
  *
- * Generated at Wednesday, December 3rd, 2014, 3:54:12 PM
+ * Generated at Monday, August 14th, 2017, 11:34:08 AM
  */
 (function() {
 'use strict';
@@ -1368,48 +1368,135 @@ crop.service('cropEXIF', [function() {
   }
 }]);
 
-crop.factory('cropHost', ['$document', 'cropAreaCircle', 'cropAreaSquare', 'cropEXIF', function($document, CropAreaCircle, CropAreaSquare, cropEXIF) {
+crop.factory('cropFilter', ['$window', function ($window) {
+    var Filters = {};
+    Filters.getPixels = function (img) {
+        var c = this.getCanvas(img.width, img.height);
+        var ctx = c.getContext('2d');
+        ctx.drawImage(img);
+        return ctx.getImageData(0, 0, c.width, c.height);
+    };
+
+    Filters.getCanvas = function (w, h) {
+        var c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        return c;
+    };
+
+    Filters.filterImage = function (filter, image, var_args) {
+        var args = [this.getPixels(image)];
+        for (var i = 2; i < arguments.length; i++) {
+            args.push(arguments[i]);
+        }
+        return filter.apply(null, args);
+    };
+
+    Filters.brightness = function (pixels, adjustment) {
+        var d = pixels.data;
+        for (var i = 0; i < d.length; i += 4) {
+            d[i] += adjustment;
+            d[i + 1] += adjustment;
+            d[i + 2] += adjustment;
+        }
+        return pixels;
+    };
+    Filters.tmpCanvas = document.createElement('canvas');
+
+    Filters.tmpCtx = Filters.tmpCanvas.getContext('2d');
+
+    Filters.createImageData = function (w, h) {
+        return this.tmpCtx.createImageData(w, h);
+    };
+
+    Filters.convolute = function (pixels, weights, opaque) {
+        var side = Math.round(Math.sqrt(weights.length));
+        var halfSide = Math.floor(side / 2);
+        var src = pixels.data;
+        var sw = pixels.width;
+        var sh = pixels.height;
+        // pad output by the convolution matrix
+        var w = sw;
+        var h = sh;
+        var output = Filters.createImageData(w, h);
+        var dst = output.data;
+        // go through the destination image pixels
+        var alphaFac = opaque ? 1 : 0;
+        for (var y = 0; y < h; y++) {
+            for (var x = 0; x < w; x++) {
+                var sy = y;
+                var sx = x;
+                var dstOff = (y * w + x) * 4;
+                // calculate the weighed sum of the source image pixels that
+                // fall under the convolution matrix
+                var r = 0, g = 0, b = 0, a = 0;
+                for (var cy = 0; cy < side; cy++) {
+                    for (var cx = 0; cx < side; cx++) {
+                        var scy = sy + cy - halfSide;
+                        var scx = sx + cx - halfSide;
+                        if (scy >= 0 && scy < sh && scx >= 0 && scx < sw) {
+                            var srcOff = (scy * sw + scx) * 4;
+                            var wt = weights[cy * side + cx];
+                            r += src[srcOff] * wt;
+                            g += src[srcOff + 1] * wt;
+                            b += src[srcOff + 2] * wt;
+                            a += src[srcOff + 3] * wt;
+                        }
+                    }
+                }
+                dst[dstOff] = r;
+                dst[dstOff + 1] = g;
+                dst[dstOff + 2] = b;
+                dst[dstOff + 3] = a + alphaFac * (255 - a);
+            }
+        }
+        return output;
+    };
+    return Filters;
+}]);
+
+crop.factory('cropHost', ['$document', 'cropAreaCircle', 'cropAreaSquare', 'cropEXIF','cropFilter', function ($document, CropAreaCircle, CropAreaSquare, cropEXIF,cropFilter) {
   /* STATIC FUNCTIONS */
 
   // Get Element's Offset
-  var getElementOffset=function(elem) {
-      var box = elem.getBoundingClientRect();
+  var getElementOffset = function (elem) {
+    var box = elem.getBoundingClientRect();
 
-      var body = document.body;
-      var docElem = document.documentElement;
+    var body = document.body;
+    var docElem = document.documentElement;
 
-      var scrollTop = window.pageYOffset || docElem.scrollTop || body.scrollTop;
-      var scrollLeft = window.pageXOffset || docElem.scrollLeft || body.scrollLeft;
+    var scrollTop = window.pageYOffset || docElem.scrollTop || body.scrollTop;
+    var scrollLeft = window.pageXOffset || docElem.scrollLeft || body.scrollLeft;
 
-      var clientTop = docElem.clientTop || body.clientTop || 0;
-      var clientLeft = docElem.clientLeft || body.clientLeft || 0;
+    var clientTop = docElem.clientTop || body.clientTop || 0;
+    var clientLeft = docElem.clientLeft || body.clientLeft || 0;
 
-      var top  = box.top +  scrollTop - clientTop;
-      var left = box.left + scrollLeft - clientLeft;
+    var top = box.top + scrollTop - clientTop;
+    var left = box.left + scrollLeft - clientLeft;
 
-      return { top: Math.round(top), left: Math.round(left) };
+    return { top: Math.round(top), left: Math.round(left) };
   };
 
-  return function(elCanvas, opts, events){
+  return function (elCanvas, opts, events) {
     /* PRIVATE VARIABLES */
 
     // Object Pointers
-    var ctx=null,
-        image=null,
-        theArea=null;
+    var ctx = null,
+      image = null,
+      theArea = null;
 
     // Dimensions
-    var minCanvasDims=[100,100],
-        maxCanvasDims=[300,300];
+    var minCanvasDims = [100, 100],
+      maxCanvasDims = [300, 300];
 
     // Result Image size
-    var resImgSize=200;
+    var resImgSize = 200;
 
     // Result Image type
-    var resImgFormat='image/png';
+    var resImgFormat = 'image/png';
 
     // Result Image quality
-    var resImgQuality=null;
+    var resImgQuality = null;
 
     /* PRIVATE FUNCTIONS */
 
@@ -1418,7 +1505,7 @@ crop.factory('cropHost', ['$document', 'cropAreaCircle', 'cropAreaSquare', 'crop
       // clear canvas
       ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-      if(image!==null) {
+      if (image !== null) {
         // draw source image
         ctx.drawImage(image, 0, 0, ctx.canvas.width, ctx.canvas.height);
 
@@ -1436,254 +1523,299 @@ crop.factory('cropHost', ['$document', 'cropAreaCircle', 'cropAreaSquare', 'crop
     }
 
     // Resets CropHost
-    var resetCropHost=function() {
-      if(image!==null) {
+    var resetCropHost = function () {
+      if (image !== null) {
         theArea.setImage(image);
-        var imageDims=[image.width, image.height],
-            imageRatio=image.width/image.height,
-            canvasDims=imageDims;
+        var imageDims = [image.width, image.height],
+          imageRatio = image.width / image.height,
+          canvasDims = imageDims;
 
-        if(canvasDims[0]>maxCanvasDims[0]) {
-          canvasDims[0]=maxCanvasDims[0];
-          canvasDims[1]=canvasDims[0]/imageRatio;
-        } else if(canvasDims[0]<minCanvasDims[0]) {
-          canvasDims[0]=minCanvasDims[0];
-          canvasDims[1]=canvasDims[0]/imageRatio;
+        if (canvasDims[0] > maxCanvasDims[0]) {
+          canvasDims[0] = maxCanvasDims[0];
+          canvasDims[1] = canvasDims[0] / imageRatio;
+        } else if (canvasDims[0] < minCanvasDims[0]) {
+          canvasDims[0] = minCanvasDims[0];
+          canvasDims[1] = canvasDims[0] / imageRatio;
         }
-        if(canvasDims[1]>maxCanvasDims[1]) {
-          canvasDims[1]=maxCanvasDims[1];
-          canvasDims[0]=canvasDims[1]*imageRatio;
-        } else if(canvasDims[1]<minCanvasDims[1]) {
-          canvasDims[1]=minCanvasDims[1];
-          canvasDims[0]=canvasDims[1]*imageRatio;
+        if (canvasDims[1] > maxCanvasDims[1]) {
+          canvasDims[1] = maxCanvasDims[1];
+          canvasDims[0] = canvasDims[1] * imageRatio;
+        } else if (canvasDims[1] < minCanvasDims[1]) {
+          canvasDims[1] = minCanvasDims[1];
+          canvasDims[0] = canvasDims[1] * imageRatio;
         }
-        elCanvas.prop('width',canvasDims[0]).prop('height',canvasDims[1]).css({'margin-left': -canvasDims[0]/2+'px', 'margin-top': -canvasDims[1]/2+'px'});
+        elCanvas.prop('width', canvasDims[0]).prop('height', canvasDims[1]);
 
-        theArea.setX(ctx.canvas.width/2);
-        theArea.setY(ctx.canvas.height/2);
-        theArea.setSize(Math.min(200, ctx.canvas.width/2, ctx.canvas.height/2));
+        theArea.setX(ctx.canvas.width / 2);
+        theArea.setY(ctx.canvas.height / 2);
+        theArea.setSize(Math.min(200, ctx.canvas.width / 2, ctx.canvas.height / 2));
       } else {
-        elCanvas.prop('width',0).prop('height',0).css({'margin-top': 0});
+        elCanvas.prop('width', 0).prop('height', 0).css({ 'margin-top': 0 });
       }
 
       drawScene();
     };
+    // Resets CropHost
+    var updateCropHost = function () {
+      if (image !== null) {
+        theArea.setImage(image);
+        var imageDims = [image.width, image.height],
+          imageRatio = image.width / image.height,
+          canvasDims = imageDims;
 
+        if (canvasDims[0] > maxCanvasDims[0]) {
+          canvasDims[0] = maxCanvasDims[0];
+          canvasDims[1] = canvasDims[0] / imageRatio;
+        } else if (canvasDims[0] < minCanvasDims[0]) {
+          canvasDims[0] = minCanvasDims[0];
+          canvasDims[1] = canvasDims[0] / imageRatio;
+        }
+        if (canvasDims[1] > maxCanvasDims[1]) {
+          canvasDims[1] = maxCanvasDims[1];
+          canvasDims[0] = canvasDims[1] * imageRatio;
+        } else if (canvasDims[1] < minCanvasDims[1]) {
+          canvasDims[1] = minCanvasDims[1];
+          canvasDims[0] = canvasDims[1] * imageRatio;
+        }
+        elCanvas.prop('width', canvasDims[0]).prop('height', canvasDims[1]);      
+      } else {
+        elCanvas.prop('width', 0).prop('height', 0).css({ 'margin-top': 0 });
+      }
+
+      drawScene();
+    };
     /**
      * Returns event.changedTouches directly if event is a TouchEvent.
      * If event is a jQuery event, return changedTouches of event.originalEvent
      */
-    var getChangedTouches=function(event){
-      if(angular.isDefined(event.changedTouches)){
+    var getChangedTouches = function (event) {
+      if (angular.isDefined(event.changedTouches)) {
         return event.changedTouches;
-      }else{
+      } else {
         return event.originalEvent.changedTouches;
       }
     };
 
-    var onMouseMove=function(e) {
-      if(image!==null) {
-        var offset=getElementOffset(ctx.canvas),
-            pageX, pageY;
-        if(e.type === 'touchmove') {
-          pageX=getChangedTouches(e)[0].pageX;
-          pageY=getChangedTouches(e)[0].pageY;
+    var onMouseMove = function (e) {
+      if (image !== null) {
+        var offset = getElementOffset(ctx.canvas),
+          pageX, pageY;
+        if (e.type === 'touchmove') {
+          pageX = getChangedTouches(e)[0].pageX;
+          pageY = getChangedTouches(e)[0].pageY;
         } else {
-          pageX=e.pageX;
-          pageY=e.pageY;
+          pageX = e.pageX;
+          pageY = e.pageY;
         }
-        theArea.processMouseMove(pageX-offset.left, pageY-offset.top);
+        theArea.processMouseMove(pageX - offset.left, pageY - offset.top);
         drawScene();
       }
     };
 
-    var onMouseDown=function(e) {
+    var onMouseDown = function (e) {
       e.preventDefault();
       e.stopPropagation();
-      if(image!==null) {
-        var offset=getElementOffset(ctx.canvas),
-            pageX, pageY;
-        if(e.type === 'touchstart') {
-          pageX=getChangedTouches(e)[0].pageX;
-          pageY=getChangedTouches(e)[0].pageY;
+      if (image !== null) {
+        var offset = getElementOffset(ctx.canvas),
+          pageX, pageY;
+        if (e.type === 'touchstart') {
+          pageX = getChangedTouches(e)[0].pageX;
+          pageY = getChangedTouches(e)[0].pageY;
         } else {
-          pageX=e.pageX;
-          pageY=e.pageY;
+          pageX = e.pageX;
+          pageY = e.pageY;
         }
-        theArea.processMouseDown(pageX-offset.left, pageY-offset.top);
+        theArea.processMouseDown(pageX - offset.left, pageY - offset.top);
         drawScene();
       }
     };
 
-    var onMouseUp=function(e) {
-      if(image!==null) {
-        var offset=getElementOffset(ctx.canvas),
-            pageX, pageY;
-        if(e.type === 'touchend') {
-          pageX=getChangedTouches(e)[0].pageX;
-          pageY=getChangedTouches(e)[0].pageY;
+    var onMouseUp = function (e) {
+      if (image !== null) {
+        var offset = getElementOffset(ctx.canvas),
+          pageX, pageY;
+        if (e.type === 'touchend') {
+          pageX = getChangedTouches(e)[0].pageX;
+          pageY = getChangedTouches(e)[0].pageY;
         } else {
-          pageX=e.pageX;
-          pageY=e.pageY;
+          pageX = e.pageX;
+          pageY = e.pageY;
         }
-        theArea.processMouseUp(pageX-offset.left, pageY-offset.top);
+        theArea.processMouseUp(pageX - offset.left, pageY - offset.top);
         drawScene();
       }
     };
 
-    this.getResultImageDataURI=function() {
+    this.getResultImageDataURI = function () {
       var temp_ctx, temp_canvas;
       temp_canvas = angular.element('<canvas></canvas>')[0];
       temp_ctx = temp_canvas.getContext('2d');
       temp_canvas.width = resImgSize;
       temp_canvas.height = resImgSize;
-      if(image!==null){
-        temp_ctx.drawImage(image, (theArea.getX()-theArea.getSize()/2)*(image.width/ctx.canvas.width), (theArea.getY()-theArea.getSize()/2)*(image.height/ctx.canvas.height), theArea.getSize()*(image.width/ctx.canvas.width), theArea.getSize()*(image.height/ctx.canvas.height), 0, 0, resImgSize, resImgSize);
+      if (image !== null) {
+        temp_ctx.drawImage(image, (theArea.getX() - theArea.getSize() / 2) * (image.width / ctx.canvas.width), (theArea.getY() - theArea.getSize() / 2) * (image.height / ctx.canvas.height), theArea.getSize() * (image.width / ctx.canvas.width), theArea.getSize() * (image.height / ctx.canvas.height), 0, 0, resImgSize, resImgSize);
       }
-      if (resImgQuality!==null ){
+      if (resImgQuality !== null) {
         return temp_canvas.toDataURL(resImgFormat, resImgQuality);
       }
       return temp_canvas.toDataURL(resImgFormat);
     };
 
-    this.setNewImageSource=function(imageSource) {
-      image=null;
+    this.setNewImageSource = function (imageSource) {
+      image = null;
       resetCropHost();
       events.trigger('image-updated');
-      if(!!imageSource) {
+      if (!!imageSource) {
         var newImage = new Image();
-        if(imageSource.substring(0,4).toLowerCase()==='http') {
+        if (imageSource.substring(0, 4).toLowerCase() === 'http') {
           newImage.crossOrigin = 'anonymous';
         }
-        newImage.onload = function(){
+        newImage.onload = function () {
           events.trigger('load-done');
 
-          cropEXIF.getData(newImage,function(){
-            var orientation=cropEXIF.getTag(newImage,'Orientation');
+          cropEXIF.getData(newImage, function () {
+            var orientation = cropEXIF.getTag(newImage, 'Orientation');
 
-            if([3,6,8].indexOf(orientation)>-1) {
+            if ([3, 6, 8].indexOf(orientation) > -1) {
               var canvas = document.createElement("canvas"),
-                  ctx=canvas.getContext("2d"),
-                  cw = newImage.width, ch = newImage.height, cx = 0, cy = 0, deg=0;
-              switch(orientation) {
+                ctx = canvas.getContext("2d"),
+                cw = newImage.width, ch = newImage.height, cx = 0, cy = 0, deg = 0;
+              switch (orientation) {
                 case 3:
-                  cx=-newImage.width;
-                  cy=-newImage.height;
-                  deg=180;
+                  cx = -newImage.width;
+                  cy = -newImage.height;
+                  deg = 180;
                   break;
                 case 6:
                   cw = newImage.height;
                   ch = newImage.width;
-                  cy=-newImage.height;
-                  deg=90;
+                  cy = -newImage.height;
+                  deg = 90;
                   break;
                 case 8:
                   cw = newImage.height;
                   ch = newImage.width;
-                  cx=-newImage.width;
-                  deg=270;
+                  cx = -newImage.width;
+                  deg = 270;
                   break;
               }
 
               canvas.width = cw;
               canvas.height = ch;
-              ctx.rotate(deg*Math.PI/180);
+              ctx.rotate(deg * Math.PI / 180);
               ctx.drawImage(newImage, cx, cy);
 
-              image=new Image();
+              image = new Image();
               image.src = canvas.toDataURL("image/png");
             } else {
-              image=newImage;
+              image = newImage;
             }
             resetCropHost();
             events.trigger('image-updated');
           });
         };
-        newImage.onerror=function() {
+        newImage.onerror = function () {
           events.trigger('load-error');
         };
         events.trigger('load-start');
-        newImage.src=imageSource;
+        newImage.src = imageSource;
       }
     };
-
-    this.setMaxDimensions=function(width, height) {
-      maxCanvasDims=[width,height];
-
-      if(image!==null) {
-        var curWidth=ctx.canvas.width,
-            curHeight=ctx.canvas.height;
-
-        var imageDims=[image.width, image.height],
-            imageRatio=image.width/image.height,
-            canvasDims=imageDims;
-
-        if(canvasDims[0]>maxCanvasDims[0]) {
-          canvasDims[0]=maxCanvasDims[0];
-          canvasDims[1]=canvasDims[0]/imageRatio;
-        } else if(canvasDims[0]<minCanvasDims[0]) {
-          canvasDims[0]=minCanvasDims[0];
-          canvasDims[1]=canvasDims[0]/imageRatio;
+    this.UpdateImageSource = function (imageSource) {
+      updateCropHost();
+      events.trigger('image-updated');
+      if (!!imageSource) {
+        var newImage = new Image();
+        if (imageSource.substring(0, 4).toLowerCase() === 'http') {
+          newImage.crossOrigin = 'anonymous';
         }
-        if(canvasDims[1]>maxCanvasDims[1]) {
-          canvasDims[1]=maxCanvasDims[1];
-          canvasDims[0]=canvasDims[1]*imageRatio;
-        } else if(canvasDims[1]<minCanvasDims[1]) {
-          canvasDims[1]=minCanvasDims[1];
-          canvasDims[0]=canvasDims[1]*imageRatio;
+        newImage.onload = function () {
+          events.trigger('load-done');
+        };
+        newImage.onerror = function () {
+          events.trigger('load-error');
+        };
+        events.trigger('load-start');
+        newImage.src = imageSource;
+      }
+    };
+    this.setMaxDimensions = function (width, height) {
+      maxCanvasDims = [width, height];
+
+      if (image !== null) {
+        var curWidth = ctx.canvas.width,
+          curHeight = ctx.canvas.height;
+
+        var imageDims = [image.width, image.height],
+          imageRatio = image.width / image.height,
+          canvasDims = imageDims;
+
+        if (canvasDims[0] > maxCanvasDims[0]) {
+          canvasDims[0] = maxCanvasDims[0];
+          canvasDims[1] = canvasDims[0] / imageRatio;
+        } else if (canvasDims[0] < minCanvasDims[0]) {
+          canvasDims[0] = minCanvasDims[0];
+          canvasDims[1] = canvasDims[0] / imageRatio;
         }
-        elCanvas.prop('width',canvasDims[0]).prop('height',canvasDims[1]).css({'margin-left': -canvasDims[0]/2+'px', 'margin-top': -canvasDims[1]/2+'px'});
+        if (canvasDims[1] > maxCanvasDims[1]) {
+          canvasDims[1] = maxCanvasDims[1];
+          canvasDims[0] = canvasDims[1] * imageRatio;
+        } else if (canvasDims[1] < minCanvasDims[1]) {
+          canvasDims[1] = minCanvasDims[1];
+          canvasDims[0] = canvasDims[1] * imageRatio;
+        }
+        elCanvas.prop('width', canvasDims[0]).prop('height', canvasDims[1]);
 
-        var ratioNewCurWidth=ctx.canvas.width/curWidth,
-            ratioNewCurHeight=ctx.canvas.height/curHeight,
-            ratioMin=Math.min(ratioNewCurWidth, ratioNewCurHeight);
+        var ratioNewCurWidth = ctx.canvas.width / curWidth,
+          ratioNewCurHeight = ctx.canvas.height / curHeight,
+          ratioMin = Math.min(ratioNewCurWidth, ratioNewCurHeight);
 
-        theArea.setX(theArea.getX()*ratioNewCurWidth);
-        theArea.setY(theArea.getY()*ratioNewCurHeight);
-        theArea.setSize(theArea.getSize()*ratioMin);
+        theArea.setX(theArea.getX() * ratioNewCurWidth);
+        theArea.setY(theArea.getY() * ratioNewCurHeight);
+        theArea.setSize(theArea.getSize() * ratioMin);
       } else {
-        elCanvas.prop('width',0).prop('height',0).css({'margin-top': 0});
+        elCanvas.prop('width', 0).prop('height', 0).css({ 'margin-top': 0 });
       }
 
       drawScene();
 
     };
 
-    this.setAreaMinSize=function(size) {
-      size=parseInt(size,10);
-      if(!isNaN(size)) {
+    this.setAreaMinSize = function (size) {
+      size = parseInt(size, 10);
+      if (!isNaN(size)) {
         theArea.setMinSize(size);
         drawScene();
       }
     };
 
-    this.setResultImageSize=function(size) {
-      size=parseInt(size,10);
-      if(!isNaN(size)) {
-        resImgSize=size;
+    this.setResultImageSize = function (size) {
+      size = parseInt(size, 10);
+      if (!isNaN(size)) {
+        resImgSize = size;
       }
     };
 
-    this.setResultImageFormat=function(format) {
+    this.setResultImageFormat = function (format) {
       resImgFormat = format;
     };
 
-    this.setResultImageQuality=function(quality){
+    this.setResultImageQuality = function (quality) {
       quality = parseFloat(quality);
-      if (!isNaN(quality) && quality>=0 && quality<=1){
+      if (!isNaN(quality) && quality >= 0 && quality <= 1) {
         resImgQuality = quality;
       }
     };
 
-    this.setAreaType=function(type) {
-      var curSize=theArea.getSize(),
-          curMinSize=theArea.getMinSize(),
-          curX=theArea.getX(),
-          curY=theArea.getY();
+    this.setAreaType = function (type) {
+      var curSize = theArea.getSize(),
+        curMinSize = theArea.getMinSize(),
+        curX = theArea.getX(),
+        curY = theArea.getY();
 
-      var AreaClass=CropAreaCircle;
-      if(type==='square') {
-        AreaClass=CropAreaSquare;
+      var AreaClass = CropAreaCircle;
+      if (type === 'square') {
+        AreaClass = CropAreaSquare;
       }
       theArea = new AreaClass(ctx, events);
       theArea.setMinSize(curMinSize);
@@ -1692,7 +1824,7 @@ crop.factory('cropHost', ['$document', 'cropAreaCircle', 'cropAreaSquare', 'crop
       theArea.setY(curY);
 
       // resetCropHost();
-      if(image!==null) {
+      if (image !== null) {
         theArea.setImage(image);
       }
 
@@ -1708,24 +1840,24 @@ crop.factory('cropHost', ['$document', 'cropAreaCircle', 'cropAreaSquare', 'crop
     theArea = new CropAreaCircle(ctx, events);
 
     // Init Mouse Event Listeners
-    $document.on('mousemove',onMouseMove);
-    elCanvas.on('mousedown',onMouseDown);
-    $document.on('mouseup',onMouseUp);
+    $document.on('mousemove', onMouseMove);
+    elCanvas.on('mousedown', onMouseDown);
+    $document.on('mouseup', onMouseUp);
 
     // Init Touch Event Listeners
-    $document.on('touchmove',onMouseMove);
-    elCanvas.on('touchstart',onMouseDown);
-    $document.on('touchend',onMouseUp);
+    $document.on('touchmove', onMouseMove);
+    elCanvas.on('touchstart', onMouseDown);
+    $document.on('touchend', onMouseUp);
 
     // CropHost Destructor
-    this.destroy=function() {
-      $document.off('mousemove',onMouseMove);
-      elCanvas.off('mousedown',onMouseDown);
-      $document.off('mouseup',onMouseMove);
+    this.destroy = function () {
+      $document.off('mousemove', onMouseMove);
+      elCanvas.off('mousedown', onMouseDown);
+      $document.off('mouseup', onMouseMove);
 
-      $document.off('touchmove',onMouseMove);
-      elCanvas.off('touchstart',onMouseDown);
-      $document.off('touchend',onMouseMove);
+      $document.off('touchmove', onMouseMove);
+      elCanvas.off('touchstart', onMouseDown);
+      $document.off('touchend', onMouseMove);
 
       elCanvas.remove();
     };
@@ -1755,6 +1887,49 @@ crop.factory('cropPubSub', [function() {
       return this;
     };
   };
+}]);
+
+crop.factory('cropUserMedia', ['$window',function ($window) {
+    var hasUserMedia = function () {
+        return !!getUserMedia();
+    }
+
+    var getUserMedia = function () {
+        navigator.getUserMedia = ($window.navigator.getUserMedia ||
+            $window.navigator.webkitGetUserMedia ||
+            $window.navigator.mozGetUserMedia ||
+            $window.navigator.msGetUserMedia);
+        return navigator.getUserMedia;
+    }
+    var requestAnimFrame = (function () {
+        return window.requestAnimationFrame ||
+            window.webkitRequestAnimationFrame ||
+            window.mozRequestAnimationFrame ||
+            window.oRequestAnimationFrame ||
+            window.msRequestAnimationFrame ||
+            function (/* function FrameRequestCallback */ callback, /* DOMElement Element */ element) {
+                return window.setTimeout(callback, 1000 / 60);
+            };
+    })();
+    var convertDataURIToBinary = function (dataURI) {
+        var BASE64_MARKER = ';base64,';
+        var base64Index = dataURI.indexOf(BASE64_MARKER) + BASE64_MARKER.length;
+        var base64 = dataURI.substring(base64Index);
+        var raw = window.atob(base64);
+        var rawLength = raw.length;
+        var array = new Uint8Array(new ArrayBuffer(rawLength));
+
+        for (var i = 0; i < rawLength; i++) {
+            array[i] = raw.charCodeAt(i);
+        }
+        return array;
+    }
+    return {
+        hasUserMedia: hasUserMedia(),
+        getUserMedia: getUserMedia,
+        requestAnimFrame: requestAnimFrame,
+        convertDataURIToBinary: convertDataURIToBinary
+    }
 }]);
 
 crop.directive('imgCrop', ['$timeout', 'cropHost', 'cropPubSub', function($timeout, CropHost, CropPubSub) {
@@ -1873,6 +2048,261 @@ crop.directive('imgCrop', ['$timeout', 'cropHost', 'cropPubSub', function($timeo
       scope.$on('$destroy', function(){
           cropHost.destroy();
       });
+    }
+  };
+}]);
+
+crop.directive('videoCrop', ['$q', '$timeout', 'cropHost', 'cropPubSub', 'cropUserMedia', function ($q, $timeout, CropHost, CropPubSub, cropUserMedia) {
+  var requestAnimFrame = cropUserMedia.requestAnimFrame;
+
+  return {
+    restrict: 'E',
+    scope: {
+      image: '=',
+      resultImage: '=',
+      disparidadeangulo: '=',
+      disparidadeolhos: '=',
+
+      callback: '=',
+      blockcallback: '=',
+      play: '=',
+      changeOnFly: '=',
+      areaType: '@',
+      areaMinSize: '=',
+      resultImageSize: '=',
+      resultImageFormat: '@',
+      resultImageQuality: '=',
+
+      onChange: '&',
+      onLoadBegin: '&',
+      onLoadDone: '&',
+      onLoadError: '&'
+    },
+    template: '<video class="rec-facial-video" style="border: 3px solid #EEE;position:static;display:none;" width="500" height="400" ></video><canvas id="mask" class="mask" style="border: 3px solid #EEE;position:static;" width="500px" height="500px"></canvas><canvas id="final" style="border: 3px solid #EEE;position:static;"></canvas>',
+    controller: ['$scope', function ($scope) {
+      $scope.events = new CropPubSub();
+    }],
+    compile: function compile(tElement, tAttrs, transclude) {
+      return {
+        pre: function preLink(scope, ele, attrs) {
+          var p_oculta = attrs.oculta || false;
+          scope.oculta = p_oculta;
+          if (!cropUserMedia.hasUserMedia) return;
+
+          navigator.getUserMedia = cropUserMedia.getUserMedia();
+          var w = attrs.width || 520,
+            h = attrs.height || 400;
+          scope.w = w;
+          scope.h = h;
+
+          scope.overlay = document.getElementById('mask');
+          angular.element(ele.find('canvas')).prop('width', 500).prop('height', 500);
+          scope.overlayCC = scope.overlay.getContext('2d');
+          scope.overlayCC.font = "30px Arial";
+
+          scope.overlayCC.translate(500, 0);
+          scope.overlayCC.scale(-1, 1);
+          var _second = 1000;
+          var _minute = _second * 60;
+          var _hour = _minute * 60;
+          var _day = _hour * 24;
+          var ctracker;
+          // Init Events Manager
+          var events = scope.events;
+
+          // Init Crop Host
+          var cropHost = new CropHost(angular.element([ele.find('canvas')[1]]), {}, events);
+
+          // Store Result Image to check if it's changed
+          var storedResultImage;
+
+          var updateResultImage = function (scope) {
+            var resultImage = cropHost.getResultImageDataURI();
+            if (storedResultImage !== resultImage) {
+              storedResultImage = resultImage;
+              scope.onChange({ $dataURI: resultImage });
+            }
+          };
+
+          // Wrapper to safely exec functions within $apply on a running $digest cycle
+          var fnSafeApply = function (fn) {
+            return function () {
+              $timeout(function () {
+                scope.$apply(function (scope) {
+                  fn(scope);
+                });
+              });
+            };
+          };
+
+          // Setup CropHost Event Handlers
+          events
+            .on('load-start', fnSafeApply(function (scope) {
+              scope.onLoadBegin({});
+            }))
+            .on('load-done', fnSafeApply(function (scope) {
+              scope.onLoadDone({});
+            }))
+            .on('load-error', fnSafeApply(function (scope) {
+              scope.onLoadError({});
+            }))
+            .on('area-move area-resize', fnSafeApply(function (scope) {
+              updateResultImage(scope);
+
+            }))
+            .on('area-move-end area-resize-end image-updated', fnSafeApply(function (scope) {
+              updateResultImage(scope);
+            }));
+
+          scope.$watch('areaType', function () {
+            cropHost.setAreaType('circle');
+            updateResultImage(scope);
+          });
+          scope.$watch('areaMinSize', function () {
+            cropHost.setAreaMinSize(50);
+            updateResultImage(scope);
+          });
+          scope.$watch('resultImageSize', function () {
+            cropHost.setResultImageSize(scope.resultImageSize);
+            updateResultImage(scope);
+          });
+          scope.$watch('resultImageFormat', function () {
+            cropHost.setResultImageFormat(scope.resultImageFormat);
+            updateResultImage(scope);
+          });
+          scope.$watch('resultImageQuality', function () {
+            cropHost.setResultImageQuality(scope.resultImageQuality);
+            updateResultImage(scope);
+          });
+
+          // Update CropHost dimensions when the directive element is resized
+          scope.$watch(
+            function () {
+              return [ele[0].clientWidth, ele[0].clientHeight];
+            },
+            function (value) {
+              cropHost.setMaxDimensions(value[0], value[1]);
+              updateResultImage(scope);
+            },
+            true
+          );
+
+          // Destroy CropHost Instance when the directive is destroying
+          scope.$on('$destroy', function () {
+            cropHost.destroy();
+          });
+          //////////////////////////////////////////////////////////////////////////////////////////////////////////
+          scope.$watch("play", function (can_play) {
+            if (can_play) {
+              play();
+            } else {
+              stop();
+            }
+          })
+
+          function stop() {
+            if (!!ctracker) {
+              ctracker.stop();
+              var videoElement = document.querySelector('video');
+              if (!!videoElement) {
+                var checker = typeof videoElement.getVideoTracks === 'function';
+                if (videoElement.getVideoTracks && checker) {
+                  var tracks = videoElement.getVideoTracks();
+                  if (tracks && tracks[0] && tracks[0].stop) {
+                    tracks[0].stop();
+                  }
+                } else if (videoElement.stop) {
+                  // deprecated, may be removed in the near future
+                  videoElement.stop();
+                }
+              }
+              if (!!videoElement) {
+                delete videoElement.src;
+              }
+            }
+          }
+
+          function play() {
+            navigator.getUserMedia(
+              {
+                video: {
+                  mandatory: {
+                    minHeight: h,
+                    minWidth: w
+                  }
+                },
+                audio: false
+              }, function (stream) {
+                scope.videoElement = document.querySelector('video');
+                scope.videoElement.pause();
+                if (navigator.mozGetUserMedia) {
+                  scope.videoElement.mozSrcObject = stream;
+                } else {
+                  var vendorURL = window.URL || window.webkitURL;
+                  scope.videoElement.src = window.URL.createObjectURL(stream);
+                }
+                // Just to make sure it autoplays
+                scope.videoElement.play();
+                if(typeof clm  !== 'undefined') {
+                  if (!ctracker)
+                    ctracker = new clm.tracker();
+
+                  ctracker.init(pModel);
+                  ctracker.start(scope.videoElement);
+                }
+                scope.end = new Date();
+
+                drawLoop();
+              }, function (err) {
+
+              });
+          }
+
+          var maxX = 0;
+          var minX = 0;
+          var maxY = 0;
+          var minY = 0;
+          function drawLoop() {
+            if (scope.play)
+              requestAnimFrame(drawLoop);
+            if (!scope.$$phase) {
+              scope.$apply(function () {
+                scope.overlayCC.clearRect(0, 0, 500, 400);
+                scope.overlayCC.drawImage(scope.videoElement, 0, 0);
+                if(typeof clm  !== 'undefined')
+                if (ctracker.getCurrentPosition() && scope.dataimgretorno == null) {
+                  var now = new Date();
+                  var distance = now - scope.end;
+                  var seconds = Math.floor((distance % _minute) / _second);
+
+                  var valuesX = ctracker.getCurrentPosition().map(function (elt) { return elt[0]; });
+                  var valuesY = ctracker.getCurrentPosition().map(function (elt) { return elt[1]; });
+
+                  var n_maxX = Math.max.apply(null, valuesX);
+                  var n_minX = Math.min.apply(null, valuesX);
+                  var n_maxY = Math.max.apply(null, valuesY);
+                  var n_minY = Math.min.apply(null, valuesY);
+
+                  if (n_maxX > maxX + 2 || n_minX < minX - 2)
+                    maxX = n_maxX;
+                  if (n_minX > minX + 2 || n_minX < minX - 2)
+                    minX = n_minX;
+                  if (n_maxY > maxY + 2 || n_maxY < maxY - 2)
+                    maxY = n_maxY;
+                  if (n_minY > minY + 2 || n_minY < minY - 2)
+                    minY = n_minY;
+
+                  scope.disparidadeangulo = !(valuesY[0] > valuesY[14] - 8 && valuesY[14] > valuesY[0] - 8);
+                  scope.disparidadeolhos = (valuesX[23] - valuesX[0]) - (valuesX[14] - valuesX[28]);
+                }
+                if (!scope.blockcallback)
+                  cropHost.UpdateImageSource(scope.overlay.toDataURL("image/jpg"));
+              })
+            }
+          }
+        }
+
+      }
     }
   };
 }]);

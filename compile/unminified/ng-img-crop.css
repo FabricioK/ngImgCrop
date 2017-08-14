@@ -16,3 +16,25 @@ img-crop canvas {
   -webkit-tap-highlight-color: rgba(255, 255, 255, 0);
   /* mobile webkit */
 }
+
+/* line 19, ../../source/scss/ng-img-crop.scss */
+video-crop {
+  width: 100%;
+  height: 100%;
+  display: block;
+  position: relative;
+  overflow: hidden;
+}
+/* line 25, ../../source/scss/ng-img-crop.scss */
+video-crop canvas {
+  display: block;
+  outline: none;
+  -webkit-tap-highlight-color: rgba(255, 255, 255, 0);
+  /* mobile webkit */
+}
+/* line 33, ../../source/scss/ng-img-crop.scss */
+video-crop .mask {
+  display: none;
+  height: 500px;
+  width: 500px;
+}
